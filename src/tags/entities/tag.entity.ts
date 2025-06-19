@@ -5,4 +5,4 @@ export class Tag implements PrismaTag {
   name: string;
   createdAt: Date;
   updatedAt: Date;
-} 
+}

@@ -1,47 +1,52 @@
-import { Controller, Get, Post, Body, Param, HttpStatus, HttpCode, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Param,
+  Body,
+  Patch,
+  Delete,
+  HttpCode,
+  HttpStatus,
+  Query,
+} from '@nestjs/common';
 import { CoffeesService } from './coffees.service';
 import { CreateCoffeeDto } from './dto/create-coffee.dto';
+import { UpdateCoffeeDto } from './dto/update-coffee.dto';
+import { FilterCoffeeDto } from './dto/filter-coffee.dto';
 
 @Controller('coffees')
 export class CoffeesController {
-  constructor(private readonly coffeesService: CoffeesService) {}
+  constructor(private readonly service: CoffeesService) {}
 
   @Get()
   async findAll() {
-    return this.coffeesService.findAll();
+    return this.service.findAll();
   }
 
   @Get('search')
-  async search(
-    @Query('start_date') start_date?: string,
-    @Query('end_date') end_date?: string,
-    @Query('name') name?: string,
-    @Query('tags') tags?: string,
-    @Query('limit') limit = 10,
-    @Query('offset') offset = 0,
-  ) {
-    const tagsList = tags ? tags.split(',') : [];
-    
-    return this.coffeesService.searchCoffees({
-      start_date: start_date ? new Date(start_date) : undefined,
-      end_date: end_date ? new Date(end_date) : undefined,
-      name,
-      tags: tagsList,
-      limit: +limit,
-      offset: +offset,
-    });
+  async search(@Query() query: FilterCoffeeDto) {
+    return this.service.search(query);
   }
 
   @Get(':id')
   async findOne(@Param('id') id: string) {
-    return this.coffeesService.findOne(id);
+    return this.service.findOne(id);
   }
 
   @Post()
-  @HttpCode(HttpStatus.CREATED)
-  async create(@Body() createCoffeeDto: CreateCoffeeDto) {
-    return this.coffeesService.create(createCoffeeDto);
+  async create(@Body() dto: CreateCoffeeDto) {
+    return this.service.create(dto);
   }
 
-  // adicionar outro endpoints
-} 
+  @Patch(':id')
+  async update(@Param('id') id: string, @Body() dto: UpdateCoffeeDto) {
+    return this.service.update(id, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async remove(@Param('id') id: string) {
+    return this.service.remove(id);
+  }
+}

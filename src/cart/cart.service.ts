@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AddItemDto } from './dto/add-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
@@ -8,47 +12,94 @@ export class CartService {
   constructor(private prisma: PrismaService) {}
 
   async getOrCreateCart(userId?: string) {
-    // Se userId for fornecido, buscar carrinho existente ou criar novo
     if (userId) {
       const existingCart = await this.prisma.cart.findFirst({
-        where: { userId },
+        where: {
+          userId,
+          status: 'AGUARDANDO_PAGAMENTO',
+        },
         include: { items: true },
       });
 
-      if (existingCart) {
-        return existingCart;
-      }
+      if (existingCart) return existingCart;
     }
 
-    // Criar novo carrinho
     return this.prisma.cart.create({
       data: {
         userId: userId || null,
+        status: 'AGUARDANDO_PAGAMENTO',
+        statusPayment: 'PENDENTE',
       },
     });
   }
 
   async getCart(cartId: string) {
-    // implementar sua lógica aqui
+    const cart = await this.prisma.cart.findUnique({
+      where: { id: cartId },
+      include: {
+        items: {
+          include: {
+            coffee: true,
+          },
+        },
+      },
+    });
+
+    if (!cart) {
+      throw new NotFoundException(`Carrinho ${cartId} não encontrado`);
+    }
+
+    return cart;
   }
 
   async addItem(cartId: string, addItemDto: AddItemDto) {
     const { coffeeId, quantity } = addItemDto;
 
-    // Verificar se o café existe
     const coffee = await this.prisma.coffee.findUnique({
       where: { id: coffeeId },
     });
 
     if (!coffee) {
-      throw new NotFoundException(`Coffee with ID ${coffeeId} not found`);
+      throw new NotFoundException(`Café com ID ${coffeeId} não encontrado`);
     }
 
-    // continue com sua lógica aqui!
+    if (quantity < 1 || quantity > 5) {
+      throw new BadRequestException(`A quantidade deve ser entre 1 e 5`);
+    }
+
+    const existingItem = await this.prisma.cartItem.findFirst({
+      where: {
+        cartId,
+        coffeeId,
+      },
+    });
+
+    if (existingItem) {
+      const newQuantity = existingItem.quantity + quantity;
+
+      if (newQuantity > 5) {
+        throw new BadRequestException(`Limite de 5 unidades por item excedido`);
+      }
+
+      return this.prisma.cartItem.update({
+        where: { id: existingItem.id },
+        data: {
+          quantity: newQuantity,
+        },
+      });
+    }
+
+    return this.prisma.cartItem.create({
+      data: {
+        cartId,
+        coffeeId,
+        quantity,
+        unitPrice: coffee.price,
+      },
+    });
   }
 
   async updateItem(cartId: string, itemId: string, updateItemDto: UpdateItemDto) {
-    // Verificar se o item existe no carrinho
     const item = await this.prisma.cartItem.findFirst({
       where: {
         id: itemId,
@@ -57,14 +108,37 @@ export class CartService {
     });
 
     if (!item) {
-      throw new NotFoundException(`Item with ID ${itemId} not found in cart ${cartId}`);
+      throw new NotFoundException(`Item ${itemId} não encontrado no carrinho`);
     }
 
-    // continue com sua lógica ou refaça
+    if (updateItemDto.quantity < 1 || updateItemDto.quantity > 5) {
+      throw new BadRequestException(`A quantidade deve ser entre 1 e 5`);
+    }
+
+    return this.prisma.cartItem.update({
+      where: { id: itemId },
+      data: {
+        quantity: updateItemDto.quantity,
+      },
+    });
   }
 
   async removeItem(cartId: string, itemId: string) {
+    const item = await this.prisma.cartItem.findFirst({
+      where: {
+        id: itemId,
+        cartId,
+      },
+    });
+
+    if (!item) {
+      throw new NotFoundException(`Item ${itemId} não encontrado no carrinho`);
+    }
+
+    await this.prisma.cartItem.delete({
+      where: { id: itemId },
+    });
 
     return { success: true };
   }
-} 
+}

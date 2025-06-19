@@ -1,109 +1,173 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
+import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateCoffeeDto } from './dto/create-coffee.dto';
-import { UpdateCoffeeDto } from './dto/update-coffee.dto';
+import { CoffeeResponseDto } from './dto/coffee-response.dto';
+import { FilterCoffeeDto } from './dto/filter-coffee.dto';
+import { Decimal } from '@prisma/client/runtime/library';
 
 @Injectable()
 export class CoffeesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  async findAll() {
+  async findAll(): Promise<CoffeeResponseDto[]> {
     const coffees = await this.prisma.coffee.findMany({
-      include: {
-        tags: {
-          include: {
-            tag: true,
-          },
-        },
-      },
+      include: { tags: { include: { tag: true } } },
     });
 
-    return coffees.map(coffee => ({
-      ...coffee,
-      tags: coffee.tags.map(coffeeTag => coffeeTag.tag),
+    return coffees.map(c => ({
+      ...c,
+      price: c.price.toNumber(),
+      tags: c.tags.map(t => t.tag.name),
     }));
   }
 
-  async findOne(id: string) {
+  async findOne(id: string): Promise<CoffeeResponseDto> {
     const coffee = await this.prisma.coffee.findUnique({
       where: { id },
-      include: {
-        tags: {
-          include: {
-            tag: true,
-          },
-        },
-      },
+      include: { tags: { include: { tag: true } } },
     });
 
     if (!coffee) {
-      throw new NotFoundException(`Coffee with ID ${id} not found`);
+      throw new NotFoundException(`Café com id ${id} não encontrado.`);
     }
 
     return {
       ...coffee,
-      tags: coffee.tags.map(coffeeTag => coffeeTag.tag),
+      price: coffee.price.toNumber(),
+      tags: coffee.tags.map(t => t.tag.name),
     };
   }
 
-  async create(createCoffeeDto: CreateCoffeeDto) {
-    // código aqui
-
-    // return this.prisma.coffee.create({data: {}});
-  }
-
-  async update(id: string, updateCoffeeDto: UpdateCoffeeDto) {
-    // código de implementação aqui
-
-    // Atualizar os dados do café
-    return this.prisma.coffee.update({
-      where: { id },
-      data: [], // seu dados atualziados iserir aqui
-      include: {
-        tags: {
-          include: {
-            tag: true,
+  async create(dto: CreateCoffeeDto): Promise<CoffeeResponseDto> {
+    try {
+      const coffee = await this.prisma.coffee.create({
+        data: {
+          name: dto.name,
+          description: dto.description,
+          price: dto.price,
+          imageUrl: dto.imageUrl,
+          tags: {
+            create: dto.tags.map(tag => ({
+              tag: { connect: { name: tag } },
+            })),
           },
         },
+        include: { tags: { include: { tag: true } } },
+      });
+
+      return {
+        ...coffee,
+        price: coffee.price.toNumber(),
+        tags: coffee.tags.map(t => t.tag.name),
+      };
+    } catch (error) {
+      throw new BadRequestException('Erro ao criar café. Verifique os dados.');
+    }
+  }
+
+  async update(id: string, dto: Partial<CreateCoffeeDto>): Promise<CoffeeResponseDto> {
+    const coffee = await this.prisma.coffee.findUnique({ where: { id } });
+    if (!coffee) {
+      throw new NotFoundException('Café não encontrado');
+    }
+
+    const updated = await this.prisma.coffee.update({
+      where: { id },
+      data: {
+        ...dto,
+        tags: dto.tags
+          ? {
+              deleteMany: {},
+              create: dto.tags.map(tag => ({
+                tag: { connect: { name: tag } },
+              })),
+            }
+          : undefined,
       },
+      include: { tags: { include: { tag: true } } },
     });
+
+    return {
+      ...updated,
+      price: updated.price.toNumber(),
+      tags: updated.tags.map(t => t.tag.name),
+    };
   }
 
   async remove(id: string) {
-    //  1 - Verificar se o café existe
+    const coffee = await this.prisma.coffee.findUnique({ where: { id } });
+    if (!coffee) {
+      throw new NotFoundException('Café não encontrado');
+    }
 
-    // 2 - Remover o café
+    await this.prisma.coffee.delete({ where: { id } });
+    return { message: 'Café removido com sucesso' };
   }
 
-  async searchCoffees(params: {
-    start_date?: Date;
-    end_date?: Date;
-    name?: string;
-    tags?: string[];
-    limit?: number;
-    offset?: number;
-  }) {
-    const { start_date, end_date, name, tags, limit = 10, offset = 0 } = params;
+  async search(query: FilterCoffeeDto): Promise<CoffeeResponseDto[]> {
+    const {
+      name,
+      minPrice,
+      maxPrice,
+      tags,
+      startDate,
+      endDate,
+      page = 1,
+      limit = 10,
+    } = query;
 
-    // Construir o filtro
+    const where: any = {};
 
-    // Filtro por data
+    if (name) {
+      where.name = { contains: name, mode: 'insensitive' };
+    }
 
-    // Filtro por nome
+    if (minPrice || maxPrice) {
+      where.price = {};
+      if (minPrice) where.price.gte = Number(minPrice);
+      if (maxPrice) where.price.lte = Number(maxPrice);
+    }
 
-    // Filtro por tags
+    if (startDate || endDate) {
+      where.createdAt = {};
+      if (startDate) where.createdAt.gte = new Date(startDate);
+      if (endDate) where.createdAt.lte = new Date(endDate);
+    }
 
-    // Buscar os cafés com paginação
+    if (tags) {
+      where.tags = {
+        some: {
+          tag: {
+            name: { in: tags.split(',') },
+          },
+        },
+      };
+    }
 
-    // Formatar a resposta
-    return {
-      data: [],
-      pagination: {
-        total: [],
-        limit,
-        offset,
-        hasMore: offset,
-      },
-    };
+    const skip = (Number(page) - 1) * Number(limit);
+    const take = Number(limit);
+
+    const [coffees, total] = await Promise.all([
+      this.prisma.coffee.findMany({
+        where,
+        include: { tags: { include: { tag: true } } },
+        skip,
+        take,
+      }),
+      this.prisma.coffee.count({ where }),
+    ]);
+
+    return coffees.map(c => ({
+      ...c,
+      price: c.price.toNumber(),
+      tags: c.tags.map(t => t.tag.name),
+      total,
+      page: Number(page),
+      limit: Number(limit),
+    }));
   }
-} 
+}
